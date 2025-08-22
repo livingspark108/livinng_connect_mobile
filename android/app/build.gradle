@@ -1,0 +1,49 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+    id 'com.google.gms.google-services'
+}
+
+android {
+    namespace = "com.liivingconnect"
+
+
+        // ... other config like compileSdkVersion, etc.
+
+
+
+    compileSdk = 35  // Updated to SDK 35
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17  // Set to Java 17 for compatibility
+        targetCompatibility = JavaVersion.VERSION_17  // Set to Java 17 for compatibility
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"  // Set Kotlin JVM target to Java 17
+    }
+    kotlin {
+        jvmToolchain(17)
+    }
+    defaultConfig {
+        applicationId = "com.liivingconnect"
+        minSdk = flutter.minSdkVersion
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+        multiDexEnabled true
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.debug  // Signing config for release
+        }
+    }
+}
+
+flutter {
+    source = "../.."  // Path to Flutter source
+}
