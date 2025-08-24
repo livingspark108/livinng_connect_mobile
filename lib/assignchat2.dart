@@ -130,8 +130,8 @@ class _ContactInfoCardState extends State<ContactInfoCard> {
   Future<void> _loadContactInfo() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _name = prefs.getString('first_name')! + prefs.getString('last_name')!;
-      _phone = prefs.getString('mobile_number') ?? '919785184266';
+      _name = prefs.getString('namee')!;
+      _phone = prefs.getString('Mobile') ?? '919785184266';
       _email = prefs.getString('email') ?? '-';
       _language = prefs.getString('contact_language') ?? '-';
     });

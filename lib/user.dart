@@ -48,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = false;
   bool hasMore = true;
   String uuid = "";
+  String pname="";
   String? _deviceToken;
   final ScrollController _scrollController = ScrollController();
 
@@ -146,122 +147,157 @@ class _HomeScreenState extends State<HomeScreen> {
       print('❌ Failed to update FCM token');
     }
   }
+  String extractProfileName(Map<String, dynamic> userJson) {
+    String profileName = "";
 
-  Future<void> _fetchUsers({bool initial = false}) async {
-    if (isLoading || (!hasMore && !initial)) return;
-
-    setState(() => isLoading = true);
-
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString('token') ?? '';
-    final role = prefs.getString('role') ?? '';
-    final vendorid = prefs.getString('vendorid') ?? '';
-    final agentId = prefs.getInt('userid') ?? '';
-
-    var assigned="";
-if(role=="agent"){
-
-  assigned="to-me";
-}
-else{
-
-  assigned="all";
-}
-    final uri = Uri.parse(
-      "https://livingconnect.in/api/$vendorid/contact/contacts-data?token=$token",
-    );
-
-    // Note: no "search" in payload, we filter client-side
-    final response = await http.post(
-      uri,
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'x-requested-with': 'XMLHttpRequest',
-        'x-external-api-request': 'true',
-      },
-      body: jsonEncode({
-        "page": 1,
-        "agent_id": agentId,
-        "assigned": assigned,
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      final List<dynamic> newUsersRaw = data['data']['users'];
-
-      if (initial) {
-        allUsersRaw.clear();
-        users.clear();
-        currentPage = 1;
-        hasMore = true;
-      }
-
-      if (newUsersRaw.isEmpty) {
-        hasMore = false;
-      } else {
-        currentPage++;
-        allUsersRaw.addAll(newUsersRaw);
-      }
-
-      if (initial) {
-        Set<String> tagsSet = {};
-        for (var user in allUsersRaw) {
-          final tagString = user['Tags'] ?? '';
-          if (tagString.toString().isNotEmpty) {
-            final List<String> tags = tagString
-                .toString()
-                .split(',')
-                .map((e) => e.toString().trim())
-                .where((tag) => tag.isNotEmpty)
-                .toList();
-            tagsSet.addAll(tags);
+    try {
+      // Check in webhook_responses → incoming
+      final incoming = userJson['Data']?['webhook_responses']?['incoming'] as List?;
+      if (incoming != null && incoming.isNotEmpty) {
+        final changes = incoming[0]?['changes'] as List?;
+        if (changes != null && changes.isNotEmpty) {
+          final contacts = changes[0]?['value']?['contacts'] as List?;
+          if (contacts != null && contacts.isNotEmpty) {
+            profileName = contacts[0]?['profile']?['name'] ?? '';
           }
         }
-        allTags = tagsSet.toList();
       }
-
-      // Map newUsersRaw → User and append to users
-      for (var userJson in newUsersRaw) {
-        final contact = userJson['Data']?['webhook_responses']?['sent']?[0]
-        ?['changes']?[0]?['value']?['statuses']?[0]?['recipient_id'] ??
-            userJson['MobileNumber'];
-
-        final rawName = contact;
-        final name = (rawName == null ||
-            rawName.toString().isEmpty ||
-            rawName.toString().toLowerCase() == 'unknown')
-            ? userJson['MobileNumber']
-            : rawName.toString();
-
-        final message = userJson['Message'] ?? '';
-        final isoTime = userJson['MessagedAt'] ?? '';
-        final time = formatWhatsAppTime(isoTime);
-        final status = userJson['Status'] ?? '';
-        final contactsId = userJson['ContactsId'] ?? 0;
-        final mobileno = userJson['MobileNumber'] ?? '';
-        uuid = userJson["ContactsUUId"];
-
-        users.add(User(
-          name: name,
-          lastMessage: message,
-          time: time,
-          image: "assets/images/logo.png",
-          status: status,
-          contactsId: contactsId,
-          mobileno: mobileno,
-        ));
-      }
-
-      setState(() => isLoading = false);
-    } else {
-      setState(() => isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to fetch users")),
-      );
+    } catch (e) {
+      debugPrint("Error extracting profile name: $e");
     }
+
+    // Fallback to MobileNumber if profile name is missing/unknown
+    if (profileName.isEmpty || profileName.toLowerCase() == "unknown") {
+      profileName = userJson['MobileNumber'] ?? "Unknown";
+    }
+
+    return profileName;
   }
+
+    Future<void> _fetchUsers({bool initial = false}) async {
+      if (isLoading || (!hasMore && !initial)) return;
+
+      setState(() => isLoading = true);
+
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token') ?? '';
+      final role = prefs.getString('role') ?? '';
+      final vendorid = prefs.getString('vendorid') ?? '';
+      final agentId = prefs.getInt('userid') ?? '';
+
+      var assigned="";
+  if(role=="agent"){
+
+    assigned="to-me";
+  }
+  else{
+
+    assigned="all";
+  }
+      final uri = Uri.parse(
+          "https://livingconnect.in/api/$vendorid/contact/contacts-data?token=$token",
+      );
+
+      // Note: no "search" in payload, we filter client-side
+      final response = await http.post(
+        uri,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'x-requested-with': 'XMLHttpRequest',
+          'x-external-api-request': 'true',
+        },
+        body: jsonEncode({
+          "page": currentPage,
+          "agent_id": agentId,
+          "assigned": assigned,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List<dynamic> newUsersRaw = data['data']['users'];
+
+        if (initial) {
+          allUsersRaw.clear();
+          users.clear();
+          currentPage = 1;
+          hasMore = true;
+        }
+
+        if (newUsersRaw.isEmpty) {
+          hasMore = false;
+        } else {
+          currentPage++;
+          allUsersRaw.addAll(newUsersRaw);
+        }
+
+        if (initial) {
+          Set<String> tagsSet = {};
+          for (var user in allUsersRaw) {
+            final tagString = user['Tags'] ?? '';
+            if (tagString.toString().isNotEmpty) {
+              final List<String> tags = tagString
+                  .toString()
+                  .split(',')
+                  .map((e) => e.toString().trim())
+                  .where((tag) => tag.isNotEmpty)
+                  .toList();
+              tagsSet.addAll(tags);
+            }
+          }
+          allTags = tagsSet.toList();
+        }
+
+        // Map newUsersRaw → User and append to users
+          for (var userJson in newUsersRaw) {
+
+
+            // Skip if already in list
+            final profileName = userJson['Data']?['initial_response']?['accepted']
+            ?['contacts']?[0]?['profile']?['name'] // WhatsApp profile
+        // fallback to Notes
+                ?? userJson['MobileNumber']; // last fallback
+
+             pname =extractProfileName(userJson);
+            final contact = userJson['Data']?['webhook_responses']?['sent']?[0]
+            ?['changes']?[0]?['value']?['statuses']?[0]?['recipient_id'] ??
+                userJson['MobileNumber'];
+
+            final rawName = contact;
+            final name = (rawName == null ||
+                rawName.toString().isEmpty ||
+                rawName.toString().toLowerCase() == 'unknown')
+                ? userJson['MobileNumber']
+                : rawName.toString();
+
+            final message = userJson['Message'] ?? '';
+            final isoTime = userJson['MessagedAt'] ?? '';
+            final time = formatWhatsAppTime(isoTime);
+            final status = userJson['Status'] ?? '';
+            final contactsId = userJson['ContactsId'] ?? 0;
+            final mobileno = userJson['MobileNumber'] ?? '';
+            uuid = userJson["ContactsUUId"];
+
+            users.add(User(
+              name: pname,
+              lastMessage: message,
+              time: time,
+              image: "assets/images/logo.png",
+              status: status,
+              contactsId: contactsId,
+              mobileno: mobileno,
+            ));
+          }
+
+        setState(() => isLoading = false);
+      } else {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Failed to fetch users")),
+        );
+      }
+    }
 
   String formatWhatsAppTime(String isoTime) {
     if (isoTime.isEmpty) return '';
@@ -606,6 +642,7 @@ else{
                                   'ContactsId', user.contactsId);
                               await prefs.setString('Mobile', user.mobileno);
                               await prefs.setString('UUID', uuid);
+                              await prefs.setString('namee', user.name);
                               DateTime lastMessageTime = DateTime.now().subtract(const Duration(hours: 25)); // default 25 hrs ago
 
                               Navigator.push(
