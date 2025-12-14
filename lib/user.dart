@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:untitled4/chat2.dart';
+import 'package:untitled4/services/notification_service.dart';
 import 'apiservice.dart';
 
 class User {
@@ -60,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _setupFirebase();
+    print("HomeScreen initState called");
     _fetchUsers(initial: true);
 
     _scrollController.addListener(() {
@@ -101,52 +101,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
 
-  Future<void> _setupFirebase() async {
-    await FirebaseMessaging.instance.requestPermission();
-
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token != null) {
-      setState(() => _deviceToken = token);
-      await registerFcm();
-    }
-
-    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
-      setState(() => _deviceToken = newToken);
-      await registerFcm();
-    });
-
-    FirebaseMessaging.onMessage.listen((msg) {
-      final notif = msg.notification;
-      if (notif != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${notif.title}: ${notif.body}')),
-        );
-      }
-    });
-  }
-
-  Future<void> registerFcm() async {
-    final fcm = FirebaseMessaging.instance;
-    final token = await fcm.getToken();
-    final prefs = await SharedPreferences.getInstance();
-    final apitoken = prefs.getString('token') ?? '';
-    int uuidd = prefs.getInt('userid') ?? 0;
-
-    if (token == null) return;
-
-    final success = await ApiService.updateFcmToken(
-      uuid: "",
-      apiToken: apitoken,
-      userId: uuidd,
-      fcmToken: token,
-    );
-
-    if (success) {
-      print('✅ FCM token updated on server');
-    } else {
-      print('❌ Failed to update FCM token');
-    }
-  }
   String extractProfileName(Map<String, dynamic> userJson) {
     String profileName = "";
 
@@ -175,15 +129,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
     Future<void> _fetchUsers({bool initial = false}) async {
+      print("_fetchUsers called, initial: $initial, isLoading: $isLoading, hasMore: $hasMore");
+      
       if (isLoading || (!hasMore && !initial)) return;
 
       setState(() => isLoading = true);
 
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token') ?? '';
-      final role = prefs.getString('role') ?? '';
-      final vendorid = prefs.getString('vendorid') ?? '';
-      final agentId = prefs.getInt('userid') ?? '';
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final token = prefs.getString('token') ?? '';
+        final role = prefs.getString('role') ?? '';
+        final vendorid = prefs.getString('vendorid') ?? '';
+        final agentId = prefs.getInt('userid') ?? '';
+
+        print("Token: ${token.isNotEmpty ? 'exists' : 'missing'}");
+        print("VendorId: ${vendorid.isNotEmpty ? 'exists' : 'missing'}");
+        print("Role: $role");
+        print("AgentId: $agentId");
+
+        if (token.isEmpty || vendorid.isEmpty) {
+          print("Missing token or vendorid, stopping fetch");
+          setState(() => isLoading = false);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("Please login again")),
+            );
+          }
+          return;
+        }
 
       var assigned="";
   if(role=="agent"){
@@ -197,6 +170,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final uri = Uri.parse(
           "https://livingconnect.in/api/$vendorid/contact/contacts-data?token=$token",
       );
+
+      print("Making API request to: ${uri.toString()}");
 
       // Note: no "search" in payload, we filter client-side
       final response = await http.post(
@@ -214,9 +189,20 @@ class _HomeScreenState extends State<HomeScreen> {
         }),
       );
 
+      print("Response status: ${response.statusCode}");
+      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List<dynamic> newUsersRaw = data['data']['users'];
+        
+        print("Fetched ${newUsersRaw.length} users");
+
+        if (initial && newUsersRaw.isNotEmpty) {
+          NotificationService().showNotification(
+            title: 'Chats loaded',
+            body: 'Ready to chat!',
+          );
+        }
 
         if (initial) {
           allUsersRaw.clear();
@@ -292,12 +278,34 @@ class _HomeScreenState extends State<HomeScreen> {
 
         setState(() => isLoading = false);
       } else {
+        print("API error: ${response.statusCode}, body: ${response.body}");
         setState(() => isLoading = false);
+        
+        NotificationService().showNotification(
+          title: 'Failed to load chats',
+          body: 'Please check your connection',
+        );
+        
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("Failed to fetch users")),
         );
       }
+    } catch (e) {
+      print("Exception in _fetchUsers: $e");
+      setState(() => isLoading = false);
+      
+      NotificationService().showNotification(
+        title: 'Error',
+        body: e.toString().length > 50 ? e.toString().substring(0, 50) : e.toString(),
+      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: ${e.toString()}")),
+        );
+      }
     }
+  }
 
   String formatWhatsAppTime(String isoTime) {
     if (isoTime.isEmpty) return '';
@@ -483,7 +491,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    print("Building HomeScreen widget, users count: ${users.length}, isLoading: $isLoading");
+    
     final displayList = _buildDisplayList();
+    
+    print("Display list count: ${displayList.length}");
 
     return WillPopScope(
       onWillPop: () async {
@@ -493,7 +505,28 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Scaffold(
         backgroundColor: Colors.white,
         appBar: _buildAppBar(),
-        body: Column(
+        body: users.isEmpty && !isLoading
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.chat_bubble_outline, size: 80, color: Colors.grey[300]),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No chats yet',
+                      style: TextStyle(fontSize: 18, color: Colors.grey[600]),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Start a conversation',
+                      style: TextStyle(fontSize: 14, color: Colors.grey[400]),
+                    ),
+                  ],
+                ),
+              )
+            : users.isEmpty && isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Label for tag filters + "All Users" option
